@@ -17,33 +17,27 @@ export class AuthService {
   ) {}
 
   async validateUser(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
-
+    const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) {
       throw new UnauthorizedException('Invalid email.');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid password.');
     }
 
-    // Password OK, return safe user info
-    const { password: _, ...result } = user;
-    return result;
+    // Do not expose password
+    const { password: _, ...safeUser } = user;
+    return safeUser;
   }
 
   async register(data: { email: string; password: string; name: string }) {
-    // Check if user already exists
     const existing = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
-
     if (existing) {
-      throw new BadRequestException('Email is already registered.');
+      throw new BadRequestException('Email already registered.');
     }
 
     const hashedPassword = await bcrypt.hash(data.password, this.saltRounds);
@@ -56,39 +50,35 @@ export class AuthService {
       },
     });
 
-    // Remove password before returning
-    const { password, ...result } = user;
-    return result;
+    const { password, ...safeUser } = user;
+    return safeUser;
+  }
+
+  // Generate JWT payload
+  createToken(user: any) {
+    const payload = { email: user.email, sub: user.id };
+    return this.jwtService.sign(payload, { expiresIn: '1h' });
   }
 
   async login(user: any) {
-    const payload = { email: user.email, sub: user.id };
-    return {
-      access_token: this.jwtService.sign(payload, {
-        expiresIn: '1h',
-      }),
-    };
+    const token = this.createToken(user);
+    return { access_token: token };
   }
 
   async validateGoogleUser(email: string, name: string) {
     let user = await this.prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      // Create new Google account
       user = await this.prisma.user.create({
         data: {
           email,
           name,
-          password: '', // No password for Google login
+          password: '', // No password for Google OAuth
         },
       });
     }
 
-    const payload = { email: user.email, sub: user.id };
-    return {
-      access_token: this.jwtService.sign(payload, {
-        expiresIn: '1h',
-      }),
-    };
+    const token = this.createToken(user);
+    return { access_token: token };
   }
 }
